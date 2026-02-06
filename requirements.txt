@@ -41,3 +41,5 @@ tqdm==4.66.6
 transformers==4.46.3
 typer-slim==0.12.5
 typing_extensions==4.12.2
+fastapi==0.115.6
+uvicorn==0.30.6
