@@ -1,15 +1,20 @@
 # Python
-venv/
-.venv/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 
-# Environment variables
+# Virtual environment
+venv/
 .env
 
-# macOS
-.DS_Store
+# FAISS indexes & generated data
+index/*.index
+index/*.pkl
 
-# IDEs
-.idea/
-.vscode/
+# Model cache
+.cache/
+~/.cache/huggingface/
+
+# OS
+.DS_Store
