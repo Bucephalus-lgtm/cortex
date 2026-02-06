@@ -1,8 +1,8 @@
 # Cortex 🧠🚨
 
-Cortex is a production incident knowledge copilot that helps engineers quickly understand **why incidents happened** by querying historical **RCAs, runbooks, and operational documents**.
+Cortex is a **production incident knowledge copilot** that helps engineers quickly understand **why incidents happened** by querying historical **RCAs, runbooks, and operational documents**.
 
-It provides **grounded, source-backed answers** using a Retrieval-Augmented Generation (RAG) style pipeline — without hallucinations and without relying on paid LLM APIs.
+It provides **grounded, source-backed answers** using a **hybrid retrieval system** — without hallucinations and without relying on paid LLM APIs.
 
 ---
 
@@ -10,7 +10,8 @@ It provides **grounded, source-backed answers** using a Retrieval-Augmented Gene
 
 - 🔍 Answers production incident questions (timeouts, Kafka lag, DB exhaustion, CPU spikes, Redis outages)
 - 📚 Searches across historical RCAs and runbooks
-- 🧠 Retrieves only relevant context using FAISS
+- 🧠 Uses **hybrid retrieval (TF-IDF + semantic embeddings)**
+- ⚖️ Ranks results using **weighted hybrid scoring**
 - 🛑 Prevents hallucinations with strict grounding
 - 🧾 Returns answers with **document-level source attribution**
 - 💸 Fully offline, zero-cost setup
@@ -33,9 +34,11 @@ Text Extraction & Sanitization
 ↓
 Chunking with Overlap
 ↓
-TF-IDF Vectorization
-↓
-FAISS Vector Index
+TF-IDF Vectorization        Dense Embeddings
+↓                           ↓
+FAISS Index (Lexical)   FAISS Index (Semantic)
+↓        ↓
+Hybrid Retrieval + Weighted Ranking
 ↓
 FastAPI (/ask)
 ↓
@@ -47,18 +50,22 @@ Grounded Answer + Sources
 
 ## 🧠 Design Principles
 
-- **Grounded answers only**  
-  Cortex never invents information. If an answer is not present in the knowledge base, it responds with:
-  > `Answer not found in knowledge base.`
+### Grounded answers only
+Cortex never invents information. If an answer is not present in the knowledge base, it responds with:
+```
 
-- **No hallucinations**  
-  Answers are deterministically generated from retrieved chunks.
+Answer not found in knowledge base.
 
-- **Offline-first**  
-  No OpenAI, no HuggingFace inference APIs, no paid services.
+```
 
-- **Production-style ingestion**  
-  Documents are sanitized and anonymized before indexing.
+### No hallucinations by design
+- No generative model produces facts
+- Answers are derived strictly from retrieved documents
+
+### Offline-first
+- No OpenAI APIs
+- No paid inference services
+- Runs entirely on local infrastructure
 
 ---
 
@@ -67,7 +74,8 @@ Grounded Answer + Sources
 - **Python**
 - **FastAPI** – API layer
 - **FAISS** – Vector similarity search
-- **Scikit-learn (TF-IDF)** – Offline embeddings
+- **Scikit-learn (TF-IDF)** – Lexical embeddings
+- **Sentence-Transformers** – Semantic embeddings (local)
 - **NLTK** – Tokenization
 - **Uvicorn** – ASGI server
 
@@ -83,13 +91,15 @@ cortex/
 ├── scripts/
 │   ├── extract_text.py  # PDF → clean text
 │   ├── chunk_docs.py    # Chunking logic
-│   ├── build_index.py   # FAISS index builder
-│   └── retrieve.py      # Local retrieval test
+│   ├── build_index.py   # TF-IDF FAISS index
+│   ├── build_embedding_index.py  # Semantic FAISS index
+│   └── retrieve.py      # Local retrieval tests
 ├── docs/
 │   ├── raw_pdfs/        # Sanitized PDFs
 │   └── clean_text/      # Extracted text
-├── index/
+├── index/               # Generated locally (gitignored)
 │   ├── faiss.index
+│   ├── faiss_embeddings.index
 │   └── metadata.pkl
 └── README.md
 
@@ -101,20 +111,21 @@ cortex/
 
 ### 1️⃣ Create virtual environment
 ```bash
-python -m venv venv
+python3 -m venv venv
 source venv/bin/activate
 ````
 
 ### 2️⃣ Install dependencies
 
 ```bash
-pip install -r requirements.txt
+python3 -m pip install -r requirements.txt
 ```
 
-### 3️⃣ Build the index
+### 3️⃣ Build indexes
 
 ```bash
-python scripts/build_index.py
+python3 scripts/build_index.py
+python3 scripts/build_embedding_index.py
 ```
 
 ### 4️⃣ Run the API
@@ -161,11 +172,10 @@ Response:
 ```json
 {
   "question": "Why did payment service timeout last quarter?",
-  "answer": "The root cause involved a mix of traffic spikes, resource saturation, configuration limits, and slow downstream calls.",
+  "answer": "The root cause involved traffic spikes, resource saturation, configuration limits, and slow downstream calls.",
   "sources": [
-    "payment-timeout-rca.pdf",
-    "cascading-failure-runbook.pdf",
-    "db-connection-exhaustion-rca.pdf"
+    "payment-timeout-rca.txt",
+    "cascading-failure-runbook.txt"
   ]
 }
 ```
@@ -192,15 +202,6 @@ Response:
 
 ---
 
-## 🔒 Data Safety & Anonymization
-
-* All documents are anonymized
-* No real company identifiers are stored
-* Indexed content contains sanitized text only
-* Raw PDFs are used only during ingestion
-
----
-
 ## 🎯 Use Cases
 
 * On-call engineers debugging incidents
@@ -212,8 +213,8 @@ Response:
 
 ## 📌 Future Improvements
 
-* Replace TF-IDF with dense embeddings
-* Add optional LLM summarization layer
+* Add evaluation harness for retrieval quality
+* Optional local LLM summarization (guarded)
 * Dockerize for deployment
 * UI dashboard for search & analytics
 * Role-based access control
@@ -228,10 +229,8 @@ Built by **Bhargab Nath**
 
 ## ⭐ Why Cortex Matters
 
-Cortex demonstrates how to build **production-safe GenAI systems** that:
+Cortex demonstrates how to build **production-safe AI systems** that:
 
 * prioritize correctness over fluency
 * avoid hallucinations by design
-* integrate cleanly with backend architectures
-
-```
+* apply IR + ML techniques responsibly
