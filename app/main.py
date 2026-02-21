@@ -12,7 +12,17 @@ EMBED_INDEX_FILE = "index/faiss_embeddings.index"
 EMBED_META_FILE = "index/embeddings_metadata.pkl"
 TOP_K = 3
 
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
+
 app = FastAPI(title="Production Knowledge Copilot")
+
+# Mount Static UI
+app.mount("/ui", StaticFiles(directory="app/static", html=True), name="static")
+
+@app.get("/", include_in_schema=False)
+def root():
+    return RedirectResponse(url="/ui/")
 
 retriever_system = None
 llm_provider = None

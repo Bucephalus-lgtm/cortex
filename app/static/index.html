@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cortex | Incident Knowledge Copilot</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/ui/style.css">
+</head>
+<body>
+    <div class="blob-1"></div>
+    <div class="blob-2"></div>
+    
+    <div class="container">
+        <header>
+            <div class="logo">
+                <span class="emoji">🧠</span>
+                <h1>Cortex</h1>
+            </div>
+            <p class="subtitle">Production Incident Knowledge Copilot</p>
+        </header>
+
+        <main class="chat-container">
+            <div id="chat-box" class="chat-box">
+                <div class="message ai-message">
+                    <div class="avatar">🧠</div>
+                    <div class="bubble">
+                        Hello! I'm Cortex. Ask me anything about past production incidents, runbooks, or system behavior.
+                    </div>
+                </div>
+            </div>
+
+            <div class="input-container">
+                <form id="ask-form">
+                    <input type="text" id="query-input" placeholder="e.g. Why did the payment service timeout last quarter?" autocomplete="off" required>
+                    <button type="submit" id="send-btn">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                    </button>
+                </form>
+            </div>
+        </main>
+    </div>
+
+    <script src="/ui/script.js"></script>
+</body>
+</html>
