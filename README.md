@@ -1,5 +1,7 @@
 # Cortex 🧠🚨
 
+![Cortex UI Demo](docs/cortex-ui.png)
+
 Cortex is a **production incident knowledge copilot** that helps engineers quickly understand **why incidents happened** by querying historical **RCAs, runbooks, and operational documents**.
 
 It provides **grounded, source-backed answers** using a **hybrid retrieval system** — without hallucinations and without relying on paid LLM APIs.
