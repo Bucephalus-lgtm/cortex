@@ -1,56 +1,53 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
-import faiss
-import pickle
 from sentence_transformers import SentenceTransformer
-import numpy as np
+
+from app.data_sources import FAISSDataSource, TFIDFRetriever, SemanticRetriever
+from app.retrieval import HybridRetriever
+from app.llm import get_llm, truncate_context
 
 INDEX_FILE = "index/faiss.index"
 META_FILE = "index/metadata.pkl"
+EMBED_INDEX_FILE = "index/faiss_embeddings.index"
+EMBED_META_FILE = "index/embeddings_metadata.pkl"
 TOP_K = 3
-
-embed_index = None
-embed_chunks = None
-embed_model = None
 
 app = FastAPI(title="Production Knowledge Copilot")
 
-index = None
-chunks = None
-vectorizer = None
-
+retriever_system = None
+llm_provider = None
 
 class AskRequest(BaseModel):
     question: str
 
-
 @app.on_event("startup")
 def load_resources():
-    global index, chunks, vectorizer
-    global embed_index, embed_chunks, embed_model
+    global retriever_system, llm_provider
 
-    # TF-IDF index
-    index = faiss.read_index(INDEX_FILE)
-    with open(META_FILE, "rb") as f:
-        data = pickle.load(f)
-    chunks = data["chunks"]
-    vectorizer = data["vectorizer"]
+    # Data Sources
+    try:
+        tfidf_ds = FAISSDataSource(INDEX_FILE, META_FILE, dict_key="chunks")
+        embed_ds = FAISSDataSource(EMBED_INDEX_FILE, EMBED_META_FILE)
+        
+        # Models
+        embed_model = SentenceTransformer("all-MiniLM-L6-v2")
+        
+        # Retrievers
+        tfidf_retriever = TFIDFRetriever(tfidf_ds)
+        semantic_retriever = SemanticRetriever(embed_ds, embed_model)
+        
+        # Hybrid Retriever
+        retriever_system = HybridRetriever([
+            (tfidf_retriever, 0.6),
+            (semantic_retriever, 0.4)
+        ])
+        print("Modular Retriever system loaded.")
+    except Exception as e:
+        print(f"Warning: Failed to load indexes. They may not exist yet. Error: {e}")
+        retriever_system = None
 
-    # Embedding index
-    embed_index = faiss.read_index("index/faiss_embeddings.index")
-    with open("index/embeddings_metadata.pkl", "rb") as f:
-        embed_chunks = pickle.load(f)
-
-    embed_model = SentenceTransformer("all-MiniLM-L6-v2")
-
-    print("TF-IDF + Embedding indexes loaded.")
-
-
-def retrieve(query: str):
-    q_vec = vectorizer.transform([query]).toarray()
-    _, indices = index.search(q_vec, TOP_K)
-    return [chunks[i] for i in indices[0]]
-
+    # LLM Initialization
+    llm_provider = get_llm()
 
 def detect_intent(question: str) -> str:
     q = question.lower()
@@ -62,10 +59,8 @@ def detect_intent(question: str) -> str:
         return "prevention"
     return "general"
 
-
 def extract_section(text: str, intent: str) -> str:
     t = text.lower()
-
     if intent == "root cause":
         keys = ["root cause", "involved", "caused by"]
     elif intent == "debug":
@@ -82,7 +77,6 @@ def extract_section(text: str, intent: str) -> str:
 
     return text[:400]
 
-
 def dedupe(texts):
     seen = set()
     result = []
@@ -93,63 +87,17 @@ def dedupe(texts):
             result.append(t)
     return result
 
-def retrieve(query: str):
-    q_vec = vectorizer.transform([query]).toarray()
-    distances, indices = index.search(q_vec, TOP_K)
-
-    results = []
-    for dist, idx in zip(distances[0], indices[0]):
-        c = chunks[idx].copy()
-        c["score"] = float(dist)      # lower = better
-        c["score_type"] = "tfidf"
-        results.append(c)
-
-    return results
-
-def retrieve_semantic(query: str, top_k=3):
-    q_emb = embed_model.encode([query]).astype("float32")
-    distances, indices = embed_index.search(q_emb, top_k)
-
-    results = []
-    for dist, idx in zip(distances[0], indices[0]):
-        c = embed_chunks[idx].copy()
-        c["score"] = float(dist)      # lower = better
-        c["score_type"] = "semantic"
-        results.append(c)
-
-    return results
-
-def hybrid_retrieve(query: str):
-    tfidf_results = retrieve(query)
-    semantic_results = retrieve_semantic(query)
-
-    combined = tfidf_results + semantic_results
-
-    # normalize
-    max_score = max(c["score"] for c in combined) or 1.0
-
-    for c in combined:
-        norm = c["score"] / max_score
-        if c["score_type"] == "tfidf":
-            c["final_score"] = 0.6 * norm
-        else:
-            c["final_score"] = 0.4 * norm
-
-    # dedupe
-    seen = set()
-    final = []
-    for c in combined:
-        h = hash(c["text"][:200])
-        if h not in seen:
-            seen.add(h)
-            final.append(c)
-
-    return sorted(final, key=lambda x: x["final_score"])[:TOP_K]
-
 @app.post("/ask")
 def ask(req: AskRequest):
+    if not retriever_system:
+        return {
+            "question": req.question,
+            "answer": "System not initialized. Please build indexes first.",
+            "sources": []
+        }
+
     intent = detect_intent(req.question)
-    retrieved = hybrid_retrieve(req.question)
+    retrieved = retriever_system.retrieve(req.question, top_k=TOP_K)
 
     extracted = [
         extract_section(c["text"], intent)
@@ -164,14 +112,20 @@ def ask(req: AskRequest):
             "answer": "Answer not found in knowledge base.",
             "sources": []
         }
+        
+    # Context window management
+    managed_context = truncate_context(extracted, max_tokens=3000)
+    
+    # LLM integration with prompt engineering
+    answer = llm_provider.generate_answer(req.question, managed_context)
 
     return {
         "question": req.question,
-        "answer": " ".join(extracted),
+        "answer": answer,
         "sources": list({c["source"] for c in retrieved})
     }
 
-
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "modular_backend": True}
+

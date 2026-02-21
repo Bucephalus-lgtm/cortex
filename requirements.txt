@@ -49,3 +49,4 @@ pycparser==2.22
 mpmath==1.3.0
 sympy==1.13.3
 networkx==3.4.2
+openai>=1.0.0
