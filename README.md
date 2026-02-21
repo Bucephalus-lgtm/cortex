@@ -213,6 +213,7 @@ Response:
 
 ## 📌 Future Improvements
 
+* Integrate LLM APIs with optimized prompt engineering and context window management; modular backend supports pluggable data sources and retrieval strategies.
 * Add evaluation harness for retrieval quality
 * Optional local LLM summarization (guarded)
 * Dockerize for deployment
