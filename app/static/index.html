@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cortex | Incident Knowledge Copilot</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="bg-glow"></div>
+    
+    <div class="container">
+        <header>
+            <h1>Cortex</h1>
+            <p>Your production incident knowledge copilot.</p>
+        </header>
+
+        <div class="search-wrapper">
+            <input type="text" id="questionInput" placeholder="Why did the payment service timeout?" autocomplete="off">
+            <button id="askBtn" class="send-btn">Ask Cortex</button>
+        </div>
+
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <p style="margin-top: 15px; color: var(--text-secondary); font-size: 0.9rem;">Consulting knowledge base...</p>
+        </div>
+
+        <div id="results">
+            <!-- Results will be injected here -->
+        </div>
+    </div>
+
+    <script>
+        const input = document.getElementById('questionInput');
+        const btn = document.getElementById('askBtn');
+        const resultsDiv = document.getElementById('results');
+        const loading = document.getElementById('loading');
+
+        async function askCortex() {
+            const question = input.value.trim();
+            if (!question) return;
+
+            // Clear previous results and show loading
+            resultsDiv.innerHTML = '';
+            loading.style.display = 'block';
+            btn.disabled = true;
+
+            try {
+                const response = await fetch('/ask', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question })
+                });
+
+                const data = await response.json();
+                
+                loading.style.display = 'none';
+                btn.disabled = false;
+
+                if (data.error) {
+                    showError(data.error, data.suggestion);
+                } else {
+                    showResult(data);
+                }
+            } catch (err) {
+                loading.style.display = 'none';
+                btn.disabled = false;
+                showError("Connection failed.", "Make sure the backend is running.");
+            }
+        }
+
+        function showResult(data) {
+            const card = document.createElement('div');
+            card.className = 'result-card';
+            
+            let sourceTags = data.sources.map(s => `<span class="source-tag">${s}</span>`).join('');
+            
+            card.innerHTML = `
+                <div class="badge badge-grounded">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                    Grounded Answer
+                </div>
+                <div class="answer-text">${data.answer}</div>
+                <span class="sources-label">SOURCE ATTRIBUTION</span>
+                <div class="sources-list">
+                    ${sourceTags || '<span class="source-tag">No direct references</span>'}
+                </div>
+            `;
+            
+            resultsDiv.appendChild(card);
+        }
+
+        function showError(msg, suggestion) {
+            const card = document.createElement('div');
+            card.className = 'result-card';
+            card.style.borderColor = 'rgba(239, 68, 68, 0.3)';
+            card.innerHTML = `
+                <div class="badge" style="background: rgba(239, 68, 68, 0.1); color: #ef4444;">Error</div>
+                <div class="answer-text" style="color: #ef4444;">${msg}</div>
+                ${suggestion ? `<p style="color: var(--text-secondary); font-size: 0.9rem;">Tip: ${suggestion}</p>` : ''}
+            `;
+            resultsDiv.appendChild(card);
+        }
+
+        btn.addEventListener('click', askCortex);
+        input.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') askCortex();
+        });
+    </script>
+</body>
+</html>

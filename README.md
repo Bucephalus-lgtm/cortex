@@ -87,23 +87,19 @@ Answer not found in knowledge base.
 
 cortex/
 ├── app/
-│   └── main.py          # FastAPI application
-├── scripts/
-│   ├── extract_text.py  # PDF → clean text
-│   ├── chunk_docs.py    # Chunking logic
-│   ├── build_index.py   # TF-IDF FAISS index
-│   ├── build_embedding_index.py  # Semantic FAISS index
-│   └── retrieve.py      # Local retrieval tests
-├── docs/
-│   ├── raw_pdfs/        # Sanitized PDFs
-│   └── clean_text/      # Extracted text
-├── index/               # Generated locally (gitignored)
-│   ├── faiss.index
-│   ├── faiss_embeddings.index
-│   └── metadata.pkl
+│   ├── main.py          # FastAPI application
+│   └── static/          # Premium Web Dashboard (HTML/CSS)
+├── cortex/              # Core Modular Logic
+│   ├── retrieval/       # Hybrid retrieval strategies
+│   ├── llm/             # Pluggable LLM providers (Groq, Ollama, OpenAI)
+│   ├── data_sources/    # Modular data loaders
+│   ├── utils/           # Prompt & Context management
+│   └── engine.py        # Orchestration layer
+├── scripts/             # Indexing & Utility scripts
+├── index/               # Vector indexes (gitignored)
 └── README.md
 
-````
+```
 
 ---
 

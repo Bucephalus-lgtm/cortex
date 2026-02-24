@@ -1,177 +1,86 @@
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
-import faiss
-import pickle
-from sentence_transformers import SentenceTransformer
-import numpy as np
+import os
+from cortex.retrieval.hybrid import HybridRetriever
+from cortex.llm.providers import OpenAIProvider, GroqProvider, OllamaProvider, MockLLMProvider
+from cortex.engine import CortexEngine
 
+app = FastAPI(title="Cortex: Production Incident Copilot")
+
+# Mount static files for the UI
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+# Configuration
 INDEX_FILE = "index/faiss.index"
 META_FILE = "index/metadata.pkl"
-TOP_K = 3
+EMBED_INDEX_FILE = "index/faiss_embeddings.index"
+EMBED_META_FILE = "index/embeddings_metadata.pkl"
 
-embed_index = None
-embed_chunks = None
-embed_model = None
-
-app = FastAPI(title="Production Knowledge Copilot")
-
-index = None
-chunks = None
-vectorizer = None
-
+engine = None
 
 class AskRequest(BaseModel):
     question: str
 
-
 @app.on_event("startup")
 def load_resources():
-    global index, chunks, vectorizer
-    global embed_index, embed_chunks, embed_model
+    global engine
+    
+    # Initialize Retriever
+    try:
+        retriever = HybridRetriever(
+            index_file=INDEX_FILE,
+            meta_file=META_FILE,
+            embed_index_file=EMBED_INDEX_FILE,
+            embed_meta_file=EMBED_META_FILE
+        )
+    except Exception as e:
+        print(f"Error loading indexes: {e}")
+        retriever = None
 
-    # TF-IDF index
-    index = faiss.read_index(INDEX_FILE)
-    with open(META_FILE, "rb") as f:
-        data = pickle.load(f)
-    chunks = data["chunks"]
-    vectorizer = data["vectorizer"]
-
-    # Embedding index
-    embed_index = faiss.read_index("index/faiss_embeddings.index")
-    with open("index/embeddings_metadata.pkl", "rb") as f:
-        embed_chunks = pickle.load(f)
-
-    embed_model = SentenceTransformer("all-MiniLM-L6-v2")
-
-    print("TF-IDF + Embedding indexes loaded.")
-
-
-def retrieve(query: str):
-    q_vec = vectorizer.transform([query]).toarray()
-    _, indices = index.search(q_vec, TOP_K)
-    return [chunks[i] for i in indices[0]]
-
-
-def detect_intent(question: str) -> str:
-    q = question.lower()
-    if "why" in q or "cause" in q:
-        return "root cause"
-    if "debug" in q or "investigate" in q:
-        return "debug"
-    if "prevent" in q or "avoid" in q:
-        return "prevention"
-    return "general"
-
-
-def extract_section(text: str, intent: str) -> str:
-    t = text.lower()
-
-    if intent == "root cause":
-        keys = ["root cause", "involved", "caused by"]
-    elif intent == "debug":
-        keys = ["debugging", "investigate", "steps"]
-    elif intent == "prevention":
-        keys = ["prevention", "avoid", "mitigation"]
+    # Determine LLM Provider based on available keys/config
+    # 1. Groq (Best for speed + Zero local impact)
+    if os.getenv("GROQ_API_KEY"):
+        print("Using GroqProvider")
+        llm_provider = GroqProvider()
+    # 2. OpenAI
+    elif os.getenv("OPENAI_API_KEY"):
+        print("Using OpenAIProvider")
+        llm_provider = OpenAIProvider()
+    # 3. Ollama (Best for local offline - defaults to phi3 model)
+    elif os.getenv("USE_OLLAMA") == "true":
+        print("Using OllamaProvider")
+        llm_provider = OllamaProvider(model=os.getenv("OLLAMA_MODEL", "phi3"))
+    # 4. Fallback to Mock
     else:
-        return text[:400]
+        print("No LLM keys found. Using MockLLMProvider.")
+        llm_provider = MockLLMProvider()
 
-    for k in keys:
-        idx = t.find(k)
-        if idx != -1:
-            return text[idx:idx + 600]
+    # Initialize Engine
+    if retriever:
+        engine = CortexEngine(retriever=retriever, llm_provider=llm_provider)
+    else:
+        print("Engine NOT initialized due to missing retriever.")
 
-    return text[:400]
-
-
-def dedupe(texts):
-    seen = set()
-    result = []
-    for t in texts:
-        h = hash(t[:200])
-        if h not in seen:
-            seen.add(h)
-            result.append(t)
-    return result
-
-def retrieve(query: str):
-    q_vec = vectorizer.transform([query]).toarray()
-    distances, indices = index.search(q_vec, TOP_K)
-
-    results = []
-    for dist, idx in zip(distances[0], indices[0]):
-        c = chunks[idx].copy()
-        c["score"] = float(dist)      # lower = better
-        c["score_type"] = "tfidf"
-        results.append(c)
-
-    return results
-
-def retrieve_semantic(query: str, top_k=3):
-    q_emb = embed_model.encode([query]).astype("float32")
-    distances, indices = embed_index.search(q_emb, top_k)
-
-    results = []
-    for dist, idx in zip(distances[0], indices[0]):
-        c = embed_chunks[idx].copy()
-        c["score"] = float(dist)      # lower = better
-        c["score_type"] = "semantic"
-        results.append(c)
-
-    return results
-
-def hybrid_retrieve(query: str):
-    tfidf_results = retrieve(query)
-    semantic_results = retrieve_semantic(query)
-
-    combined = tfidf_results + semantic_results
-
-    # normalize
-    max_score = max(c["score"] for c in combined) or 1.0
-
-    for c in combined:
-        norm = c["score"] / max_score
-        if c["score_type"] == "tfidf":
-            c["final_score"] = 0.6 * norm
-        else:
-            c["final_score"] = 0.4 * norm
-
-    # dedupe
-    seen = set()
-    final = []
-    for c in combined:
-        h = hash(c["text"][:200])
-        if h not in seen:
-            seen.add(h)
-            final.append(c)
-
-    return sorted(final, key=lambda x: x["final_score"])[:TOP_K]
+@app.get("/")
+def read_root():
+    return FileResponse("app/static/index.html")
 
 @app.post("/ask")
 def ask(req: AskRequest):
-    intent = detect_intent(req.question)
-    retrieved = hybrid_retrieve(req.question)
-
-    extracted = [
-        extract_section(c["text"], intent)
-        for c in retrieved
-    ]
-
-    extracted = dedupe(extracted)
-
-    if not extracted:
+    if not engine:
         return {
-            "question": req.question,
-            "answer": "Answer not found in knowledge base.",
-            "sources": []
+            "error": "Engine not initialized. Please check if indexes are built.",
+            "suggestion": "Run scripts/build_index.py and scripts/build_embedding_index.py"
         }
-
-    return {
-        "question": req.question,
-        "answer": " ".join(extracted),
-        "sources": list({c["source"] for c in retrieved})
-    }
-
+    
+    return engine.ask(req.question)
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "engine_ready": engine is not None,
+        "llm_provider": type(engine.llm_provider).__name__ if engine else None
+    }
